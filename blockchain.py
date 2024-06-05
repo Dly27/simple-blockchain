@@ -29,6 +29,7 @@ class Blockchain:
     def __init__(self):
         self.chain = [self.create_genesis_block()]
         self.pending_transactions = []
+        self.mining_reward = 0.01
 
     connection = pymysql.connect(
         host='localhost',
@@ -40,8 +41,18 @@ class Blockchain:
     def create_genesis_block(self):
         return Block(0, time(), [], "0")
 
-    def add_block(self, block):
+    def add_block(self, block, proof):
+        previous_hash = self.chain[-1].hash
+        if previous_hash != block.prev_hash:
+            return False
+        if not self.is_valid_proof(block, proof):
+            return False
+        block.hash = proof
         self.chain.append(block)
+        return True
+
+    def is_valid_proof(self, block, proof):
+        return proof.startswith('0' * self.difficulty) and proof == block.calculate_hash()
 
     def is_chain_valid(self):
         for i in range(1, len(self.chain)):
@@ -54,30 +65,45 @@ class Blockchain:
         return True
 
     def add_transaction(self, transaction):
+        fee = 0.01
         sender_account = Account(transaction.sender)
         sender_account.load()
-        if sender_account.balance >= transaction.amount:
-            sender_account.balance -= transaction.amount
+        if sender_account.balance + fee >= transaction.amount:
+            sender_account.balance -= transaction.amount + fee
             sender_account.save()
             self.pending_transactions.append(transaction)
 
-def mine_pending_transactions(self):
+def mine_pending_transactions(self, mining_reward_address):
+    mining_reward = self.mining_reward
+
+    mining_reward_transaction = Transaction(
+        sender="ID",
+        recipient=mining_reward_address,
+        amount=mining_reward,
+        ts=time()
+    )
+    self.pending_transactions.append(mining_reward_transaction)
+
     block_data = [tx.to_dict() for tx in self.pending_transactions]
     new_block = Block(len(self.chain), time(), block_data, self.chain[-1].hash)
-    new_block.mine_block(4)
-    self.add_block(new_block)
+    proof = new_block.mine_block(self.difficulty)
 
-    for tx in self.pending_transactions:
-        sender_account = Account(tx.sender)
-        sender_account.load()
-        recipient_account = Account(tx.recipient)
-        recipient_account.load()
-        sender_account.balance -= tx.amount
-        recipient_account.balance += tx.amount
-        sender_account.save()
-        recipient_account.save()
+    if self.add_block(new_block, proof):
 
-    self.pending_transactions = []
+        for tx in self.pending_transactions[:-1]:
+            sender_account = Account(tx.sender)
+            sender_account.load()
+            recipient_account = Account(tx.recipient)
+            recipient_account.load()
+            sender_account.balance -= tx.amount
+            recipient_account.balance += tx.amount
+            sender_account.save()
+            recipient_account.save()
+
+        self.pending_transactions = []
+        return new_block
+
+    return None
 
 
 class Transaction:
